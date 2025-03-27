@@ -1,0 +1,141 @@
+services:
+  - type: web
+    name: n8n
+
+    # --- Variables d'environnement ---
+    envVars:
+      # Configuration de base de n8n
+      - key: PORT
+        value: "5678"
+      - key: N8N_LOG_LEVEL
+        value: "info"
+      - key: GENERIC_TIMEZONE
+        value: "Europe/Paris"
+      - key: TZ
+        value: "fr"
+      - key: N8N_ENCRYPTION_KEY
+        generateValue: true
+      - key: WEBHOOK_URL
+        sync: false
+      - key: WEBHOOK_TUNNEL_URL
+        sync: false
+        
+      # Sécurité et authentification
+      - key: N8N_USER_MANAGEMENT_DISABLED
+        value: "false"
+      - key: N8N_BASIC_AUTH_USER
+        sync: false
+      - key: N8N_BASIC_AUTH_PASSWORD
+        sync: false
+      - key: N8N_JWT_AUTH_ACTIVE
+        value: "true"
+      - key: N8N_JWT_AUTH_HEADER
+        value: "X-N8N-Authorization"
+        
+      # Configuration de base de données (recommandé pour la production)
+      - key: DB_TYPE
+        value: "postgresdb"  # Changez à "sqlite" si vous préférez SQLite
+      - key: DB_POSTGRESDB_HOST
+        sync: false
+      - key: DB_POSTGRESDB_DATABASE
+        sync: false
+      - key: DB_POSTGRESDB_USER
+        sync: false
+      - key: DB_POSTGRESDB_PASSWORD
+        sync: false
+      - key: DB_POSTGRESDB_PORT
+        value: "5432"
+        
+      # Configuration d'exécution
+      - key: EXECUTIONS_PROCESS
+        value: "main"  # ou "own" pour isoler les exécutions de workflows
+      - key: EXECUTIONS_TIMEOUT
+        value: "300000"  # 5 minutes timeout par défaut
+      - key: EXECUTIONS_TIMEOUT_MAX
+        value: "3600000"  # 1 heure max timeout
+      - key: MAX_WORKFLOW_OPERATIONS
+        value: "1000"  # Limite d'opérations par workflow
+        
+      # Activation des nœuds et packages communautaires
+      - key: N8N_COMMUNITY_PACKAGES_ENABLED
+        value: "true"
+      - key: N8N_COMMUNITY_NODES_ENABLED
+        value: "true"
+      - key: N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE
+        value: "true"
+      - key: N8N_COMMUNITY_PACKAGES_INSTALL_TIMEOUT
+        value: "60000"  # Timeout de 60 secondes pour l'installation des packages
+        
+      # Configuration de l'environnement Node.js
+      - key: NODE_VERSION
+        value: "18.17.0"
+
+    # --- Commande de construction (build) optimisée ---
+    buildCommand: |
+      # Installation de NVM pour gérer les versions de Node.js
+      echo "💾 Installation de Node.js via NVM..."
+      curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.3/install.sh | bash
+      export NVM_DIR="$HOME/.nvm"
+      [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+      
+      # Installation et activation de Node.js 18.17.0
+      echo "💾 Installation de Node.js 18.17.0..."
+      nvm install 18.17.0
+      nvm use 18.17.0
+      nvm alias default 18.17.0  # Définir comme version par défaut
+      
+      # Vérification de la version de Node.js
+      echo "🔄 Vérification de la version de Node.js installée..."
+      node -v
+      
+      # Optimisation: Ne nettoyer que si nécessaire
+      if [ -d "/home/node/.n8n" ] || [ -d "/home/node/node_modules" ]; then
+        echo "🚀 Nettoyage des installations précédentes..."
+        rm -rf /home/node/.n8n
+        rm -rf /home/node/node_modules
+      fi
+      
+      # Clonage de ton fork de n8n avec optimisation
+      echo "📥 Clonage du fork GitHub de n8n..."
+      git clone --depth=1 --single-branch https://github.com/TON-FORK/n8n.git /home/node/n8n
+      cd /home/node/n8n
+      
+      # Installation des dépendances de n8n avec mise en cache
+      echo "📦 Installation des dépendances..."
+      npm ci --prefer-offline --no-audit
+      
+      # Compilation de n8n
+      echo "🔧 Compilation de n8n..."
+      npm run build
+      
+      # Installation des MCP (nœuds communautaires et serveurs)
+      echo "📦 Installation des MCP (Community Packages)..."
+      mkdir -p /home/node/.n8n/custom
+      npm install --no-save --prefix /home/node/.n8n/custom n8n-nodes-mcp @modelcontextprotocol/server-brave-search @modelcontextprotocol/server-perplexity-ask
+
+    # --- Commande de démarrage ---
+    startCommand: |
+      # Lancement de n8n avec NVM
+      echo "🌐 Lancement de n8n..."
+      export NVM_DIR="$HOME/.nvm"
+      [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+      nvm use 18.17.0
+      
+      # Démarrage de n8n depuis le dossier cloné avec options optimisées
+      cd /home/node/n8n
+      NODE_ENV=production npm run start -- --tunnel
+
+    # --- Disques persistants ---
+    disks:
+      # Disque pour les dépendances (node_modules)
+      - name: node-modules
+        mountPath: /home/node/node_modules
+        sizeGB: 1
+      # Disque pour les données de n8n (workflows, identifiants, etc.)
+      - name: n8n-data
+        mountPath: /home/node/.n8n
+        sizeGB: 1
+      # Cache npm pour accélérer les futures installations
+      - name: npm-cache
+        mountPath: /home/node/.npm
+        sizeGB: 0.5
